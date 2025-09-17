@@ -1,5 +1,6 @@
 # thuật toán Negamax + Alpha-Beta + TT
 
+
 from math import inf
 
 def evaluate_simple(board, player):
