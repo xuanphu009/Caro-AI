@@ -4,8 +4,14 @@
 # VSCode settings
 .vscode/
 
-# Python cache
+# Python cache and virtual env
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*.so
+*.egg-info/
+.env/
+venv/
+.envrc
 
+# Logs
+*.log

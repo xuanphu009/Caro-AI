@@ -25,12 +25,16 @@ class Board:
         self.zobrist_side = np.random.randint(low=0, high=2**63, dtype=np.int64)
         self.zobrist_hash = np.int64(0)
 
+        self.move_count = 0
+
     def reset(self):
         """Reset board về trạng thái ban đầu"""
         self.grid.fill(0)
         self.move_stack.clear()
         self.last_move = None
         self.zobrist_hash = np.int64(0)
+
+        self.move_count = 0
 
     def play(self, r: int, c: int, player: int):
         """Đánh tại (r,c) bởi player (1 hoặc -1). Không kiểm tra hợp lệ ở đây (caller phải đảm bảo)."""
@@ -45,6 +49,8 @@ class Board:
         # toggle side (nếu bạn dùng side bit)
         self.zobrist_hash ^= np.int64(self.zobrist_side)
 
+        self.move_count += 1
+
     def undo(self):
         """Hoàn tác nước đi cuối cùng"""
         if not self.move_stack:
@@ -56,6 +62,8 @@ class Board:
         # undo zobrist: XOR cùng giá trị sẽ phục hồi
         self.zobrist_hash ^= np.int64(self.zobrist_table[r, c, piece_index])
         self.zobrist_hash ^= np.int64(self.zobrist_side)
+
+        self.move_count -= 1
 
     def in_bounds(self, r: int, c: int) -> bool:
         return 0 <= r < self.size and 0 <= c < self.size
@@ -124,7 +132,7 @@ class Board:
         p = (self.grid == current_player).astype(np.uint8)
         o = (self.grid == -current_player).astype(np.uint8)
         return np.stack([p, o], axis=0)
-
+    
     def print_board(self):
         """In board ra console (debug)"""
         for r in range(self.size):
