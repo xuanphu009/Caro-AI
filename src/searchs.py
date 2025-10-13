@@ -23,13 +23,28 @@ import numpy as np
 from typing import Optional, Tuple, Dict, List
 from collections import defaultdict
 from game import Board
-from evaluate import evaluate_pattern, evaluate_simple
+from evaluate import evaluate_pattern, evaluate_simple, evaluate_advanced
 from model import evaluate_model
 
 # CONSTANTS
 INF = float('inf')
 MATE_SCORE = 1000000
 MAX_DEPTH = 50
+
+# Thêm helper function để check model
+def _get_default_evaluate_fn():
+    """Auto-detect best available evaluate function"""
+    try:
+        # Try to import and check if model is loaded
+        from model import evaluate_model, _GLOBAL_ENGINE
+        if _GLOBAL_ENGINE is not None:
+            return evaluate_model
+    except (ImportError, NameError):
+        pass
+    
+    # Fallback to pattern heuristic
+    return evaluate_pattern
+
 
 # TRANSPOSITION TABLE
 class TTEntry:
@@ -421,9 +436,10 @@ def pvs(board: Board, depth: int, alpha: float, beta: float,
     
     return best_value
 
+
 # ITERATIVE DEEPENING WITH ASPIRATION WINDOWS
 def get_best_move(board: Board, max_depth: int = 6, max_time: float = 2.0,
-                  player: int = 1, evaluate_fn = evaluate_model,
+                  player: int = 1, evaluate_fn = None,
                   policy_scores: Optional[Dict] = None,
                   verbose: bool = False) -> Tuple[Optional[Tuple[int,int]], float, dict]:
     """
@@ -432,6 +448,11 @@ def get_best_move(board: Board, max_depth: int = 6, max_time: float = 2.0,
     Returns:
         (best_move, best_value, stats)
     """
+    # Auto-detect evaluate function
+    if evaluate_fn is None:
+        evaluate_fn = _get_default_evaluate_fn()
+
+    
     start_time = time.perf_counter()
     
     # Initialize data structures

@@ -45,5 +45,13 @@ class CaroDataset(Dataset):
         y = torch.tensor(self.results[idx])
         return x, y
 
-    def is_full(self):
-        return not (self.grid == 0).any()
+    def is_full(self, index: int = -1) -> bool:
+        """
+        Kiểm tra bàn cờ có đầy chưa.
+        index: chỉ số của ván trong dataset (mặc định là ván cuối cùng)
+        """
+        if len(self.boards) == 0:
+            return False
+        board = self.boards[index]
+        return not (board == 0).any()
+
