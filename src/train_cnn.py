@@ -1,9 +1,18 @@
-from dataset import CaroDataset
+# src/train_cnn.py
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+
 from trainer import train_model
-from model import build_preset
 
-dataset = CaroDataset(data_dir="data/selfplay")
-print("Dataset:", len(dataset))
-
-model = build_preset("xlarge")  # hoặc "small", "base", "large", "xlarge"
-train_model(model, dataset, epochs=50, batch_size=128, lr=1e-3) # 10->50, 64->128, tiny->xlarge
+if __name__ == "__main__":
+    model, history = train_model(
+        data_dir="data/professional",
+        model_preset="large",
+        epochs=120,              # tang dan vi co du lieu nhieu hon
+        batch_size=64,          # tang dan
+        lr=5e-4,                # giảm learning rate một chút (ổn định hơn)
+        use_ema=True,
+        early_stopping_patience=1000  # Tắt early stopping
+    )
+    print("Training complete!")

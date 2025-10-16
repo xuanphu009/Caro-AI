@@ -1,65 +1,30 @@
 """
-═══════════════════════════════════════════════════════════════════════════════
 CARO AI - SELF-PLAY DATA GENERATOR (v3.0)
 Generate training data by AI playing against itself
-═══════════════════════════════════════════════════════════════════════════════
-
 Features:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[1] MULTIPLE STRATEGIES
-    ✅ Pure search (pattern heuristic)
-    ✅ Model-guided search (CNN + alpha-beta)
-    ✅ Random baseline (for comparison)
-    ✅ Mixed strategies (exploration vs exploitation)
+[1] Chiến lược đa dạng
+    Tìm kiếm theo mẫu (pattern heuristic)
+    Dùng model CNN kết hợp alpha-beta
+    Chơi ngẫu nhiên (baseline so sánh)
+    Kết hợp giữa khám phá và khai thác (mixed strategy)
 
-[2] PROGRESSIVE DIFFICULTY
-    ✅ Stage 1: Depth 2-3 (fast, basic patterns)
-    ✅ Stage 2: Depth 4-5 (medium strength)
-    ✅ Stage 3: Depth 6+ with model (strong)
-
-[3] DATA QUALITY CONTROL
-    ✅ Save game metadata (depth, time, strategy)
-    ✅ Filter trivial games (too short/long)
-    ✅ Balance dataset (win/loss/draw ratio)
-    ✅ Deduplicate positions
-
-[4] PARALLEL GENERATION
-    ✅ Multi-process support
-    ✅ Progress tracking
-    ✅ Automatic batching
-
-[5] INTEGRATION WITH TRAINING
-    ✅ Compatible with dataset.py
-    ✅ Direct training loop integration
-    ✅ Incremental learning support
-
-Usage:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Basic:
-    python src/selfplay.py --n_games 1000 --max_depth 3
-
-With model:
-    python src/selfplay.py --n_games 500 --use_model --model_path checkpoints/caro_best.pt
-
-Progressive:
-    python src/selfplay.py --n_games 2000 --progressive --stages 3
-
-Parallel:
-    python src/selfplay.py --n_games 5000 --workers 4
-
-Custom:
-    from selfplay import SelfPlayGenerator
-    
-    generator = SelfPlayGenerator(
-        max_depth=4,
-        max_time=2.0,
-        use_model=True,
-        model_path="checkpoints/caro_best.pt"
-    )
-    
-    generator.generate_games(n_games=1000, save_dir="data/selfplay")
-
-═══════════════════════════════════════════════════════════════════════════════
+[2] Tăng độ khó theo giai đoạn
+    Giai đoạn 1: Độ sâu 2-3 (dễ, nhanh)
+    Giai đoạn 2: Độ sâu 4-5 (trung bình)
+    Giai đoạn 3: Độ sâu 6+ và dùng model (khó)
+[3] Kiểm soát chất lượng dữ liệu
+    Lưu metadata: độ sâu, thời gian, chiến lược
+    Lọc trận quá ngắn hoặc quá dài
+    Cân bằng dữ liệu: thắng / thua / hòa
+    Loại bỏ trạng thái trùng lặp
+[4] Tạo dữ liệu song song
+    Hỗ trợ multi-process (nhiều luồng)
+    Hiển thị tiến độ
+    Tự động chia lô (batching)
+[5] Tích hợp dễ dàng với huấn luyện
+    Tương thích với dataset.py
+    Có thể tích hợp trực tiếp vào vòng lặp huấn luyện
+    Hỗ trợ học tăng cường (incremental learning)
 """
 
 import os
@@ -74,19 +39,14 @@ from collections import defaultdict
 import multiprocessing as mp
 
 import numpy as np
-
-# Add parent directory to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
 from game import Board
 from evaluate import evaluate_pattern, evaluate_simple
 from searchs import get_best_move
 
-
-# ═══════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════
-
 @dataclass
 class SelfPlayConfig:
     """Configuration for self-play generation"""
@@ -120,10 +80,7 @@ class SelfPlayConfig:
     save_metadata: bool = True
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # GAME STRATEGIES
-# ═══════════════════════════════════════════════════════════════════════════
-
 class GameStrategy:
     """Base class for game playing strategies"""
     
@@ -160,7 +117,7 @@ class SearchStrategy(GameStrategy):
             )
             return move
         except Exception as e:
-            print(f"⚠️  Search failed: {e}, using random move")
+            print(f"Search failed: {e}, using random move")
             return RandomStrategy().get_move(board, player)
 
 
@@ -179,10 +136,10 @@ class ModelGuidedStrategy(GameStrategy):
             self.evaluate_fn = evaluate_model
             self.policy_fn = policy_suggest
             self.model_loaded = True
-            print(f"✅ Model loaded: {model_path}")
+            print(f"Model loaded: {model_path}")
         except Exception as e:
-            print(f"⚠️  Failed to load model: {e}")
-            print("   Falling back to pattern heuristic")
+            print(f"Failed to load model: {e}")
+            print("Falling back to pattern heuristic")
             self.evaluate_fn = evaluate_pattern
             self.policy_fn = None
     
@@ -207,7 +164,7 @@ class ModelGuidedStrategy(GameStrategy):
             )
             return move
         except Exception as e:
-            print(f"⚠️  Model-guided search failed: {e}, using pattern search")
+            print(f"⚠️Model-guided search failed: {e}, using pattern search")
             return SearchStrategy(self.max_depth, self.max_time).get_move(board, player)
 
 
@@ -226,10 +183,7 @@ class MixedStrategy(GameStrategy):
             return self.main_strategy.get_move(board, player)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # SELF-PLAY GENERATOR
-# ═══════════════════════════════════════════════════════════════════════════
-
 class SelfPlayGenerator:
     """Main class for generating self-play games"""
     
@@ -271,7 +225,7 @@ class SelfPlayGenerator:
         
         elif self.config.strategy == "model" or self.config.use_model:
             if not self.config.model_path:
-                print("⚠️  No model path provided, falling back to search")
+                print("No model path provided, falling back to search")
                 strategy = SearchStrategy(
                     max_depth=self.config.max_depth,
                     max_time=self.config.max_time
@@ -301,7 +255,7 @@ class SelfPlayGenerator:
     def _print_config(self):
         """Print configuration"""
         print("\n" + "="*60)
-        print("🎮 SELF-PLAY CONFIGURATION")
+        print("SELF-PLAY CONFIGURATION")
         print("="*60)
         print(f"Strategy: {self.config.strategy}")
         print(f"Max Depth: {self.config.max_depth}")
@@ -454,8 +408,8 @@ class SelfPlayGenerator:
             self.config.save_dir = save_dir
             os.makedirs(save_dir, exist_ok=True)
         
-        print(f"\n🎮 Generating {n_games} self-play games...")
-        print(f"💾 Saving to: {self.config.save_dir}")
+        print(f"\nGenerating {n_games} self-play games...")
+        print(f"Saving to: {self.config.save_dir}")
         
         start_time = time.time()
         valid_games = 0
@@ -481,7 +435,7 @@ class SelfPlayGenerator:
                           f"ETA: {eta:.0f}s", end='\r')
             
             except Exception as e:
-                print(f"\n⚠️  Error in game {i}: {e}")
+                print(f"\nError in game {i}: {e}")
                 self.stats['errors'] += 1
                 continue
         
@@ -489,7 +443,7 @@ class SelfPlayGenerator:
         
         # Final report
         print(f"\n\n{'='*60}")
-        print("✅ GENERATION COMPLETE")
+        print(" GENERATION COMPLETE")
         print("="*60)
         print(f"Total Games: {self.stats['total_games']}")
         print(f"Valid Games: {valid_games}")
@@ -531,14 +485,14 @@ class SelfPlayGenerator:
             ]
         
         print("\n" + "="*60)
-        print("📈 PROGRESSIVE TRAINING")
+        print(" PROGRESSIVE TRAINING")
         print("="*60)
         print(f"Stages: {len(stages)}")
         print(f"Games per stage: {n_games_per_stage}")
         print("="*60)
         
         for stage_idx, stage_config in enumerate(stages, 1):
-            print(f"\n🎯 Stage {stage_idx}/{len(stages)}: {stage_config.get('name', 'Unnamed')}")
+            print(f"\n Stage {stage_idx}/{len(stages)}: {stage_config.get('name', 'Unnamed')}")
             print(f"   Depth: {stage_config['max_depth']} | Time: {stage_config['max_time']}s")
             
             # Update config
@@ -555,11 +509,7 @@ class SelfPlayGenerator:
                 save_dir=stage_dir
             )
 
-
-# ═══════════════════════════════════════════════════════════════════════════
 # PARALLEL GENERATION (for speed)
-# ═══════════════════════════════════════════════════════════════════════════
-
 def _worker_generate_game(args):
     """Worker function for parallel generation"""
     game_id, config_dict = args
@@ -577,7 +527,7 @@ def _worker_generate_game(args):
             return True
         return False
     except Exception as e:
-        print(f"⚠️  Worker error in game {game_id}: {e}")
+        print(f"  Worker error in game {game_id}: {e}")
         return False
 
 
@@ -605,8 +555,8 @@ def generate_games_parallel(
     
     os.makedirs(config.save_dir, exist_ok=True)
     
-    print(f"\n🚀 Generating {n_games} games with {n_workers} workers...")
-    print(f"💾 Saving to: {config.save_dir}")
+    print(f"\n Generating {n_games} games with {n_workers} workers...")
+    print(f" Saving to: {config.save_dir}")
     
     # Convert config to dict for pickling
     config_dict = {
@@ -640,7 +590,7 @@ def generate_games_parallel(
     valid_games = sum(results)
     
     print(f"\n\n{'='*60}")
-    print("✅ PARALLEL GENERATION COMPLETE")
+    print(" PARALLEL GENERATION COMPLETE")
     print("="*60)
     print(f"Valid Games: {valid_games}/{n_games}")
     print(f"Total Time: {total_time:.1f}s")
@@ -648,10 +598,7 @@ def generate_games_parallel(
     print("="*60)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # COMMAND LINE INTERFACE
-# ═══════════════════════════════════════════════════════════════════════════
-
 def main():
     import argparse
     

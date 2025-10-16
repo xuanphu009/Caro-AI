@@ -1,64 +1,50 @@
 # định nghĩa CNN (PyTorch)
 
 """
-═══════════════════════════════════════════════════════════════════════════════
-CARO AI - ADVANCED MODEL CENTER (v3.0)
-State-of-the-art CNN architecture for Gomoku/Caro game position evaluation
-═══════════════════════════════════════════════════════════════════════════════
+CARO AI - TRUNG TÂM MÔ HÌNH TIÊN TIẾN (v3.0)
+Kiến trúc CNN tiên tiến để đánh giá vị trí Gomoku/Caro
 
-Architecture Highlights:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[1] MULTI-SCALE FEATURE EXTRACTION
-    - Parallel convolutions (1x1, 3x3, 5x5) like Inception
-    - Captures both local patterns and global strategy
-    
-[2] RESIDUAL TOWER with SE-NET ATTENTION
-    - Deep residual blocks (10-20 layers)
-    - Squeeze-Excitation for channel-wise attention
-    - Bottleneck design for efficiency
-    
-[3] DUAL-HEAD OUTPUT
-    - Value Head: Win probability estimation [-1, 1]
-    - Policy Head: Move probability distribution [H*W]
-    
-[4] ADVANCED TRAINING FEATURES
-    - Mixed Precision (FP16) for 2x speedup
-    - Label Smoothing for better generalization
-    - Cosine Annealing with Warmup
-    - Gradient Clipping & Weight Decay
-    - EMA (Exponential Moving Average) for stable inference
-    
-[5] OPTIMIZED INFERENCE
-    - TorchScript/ONNX export
-    - Batch evaluation for search tree nodes
-    - FP16 inference on CUDA
+[1] TRÍCH XUẤT FEATURES ĐA TỶ LỆ
+    - Convolutions song song (1x1, 3x3, 5x5) theo Inception
+    - Bắt được cả local patterns và global strategy
+
+[2] RESIDUAL TOWER VỚI SE-NET ATTENTION
+    - Deep residual blocks (10-20 lớp)
+    - Squeeze-Excitation để tập trung vào channels quan trọng
+    - Bottleneck design tiết kiệm tham số
+
+[3] OUTPUT NHỊ KỲ (Dual-Head)
+    - Value Head: Đánh giá giá trị vị trí [-1, 1]
+    - Policy Head: Phân phối xác suất nước đi [H*W]
+
+[4] HUẤN LUYỆN TIÊN TIẾN
+    - Mixed Precision (FP16) tăng tốc độ 2x
+    - Label Smoothing cải thiện tổng quát hóa
+    - Cosine Annealing + Warmup điều chỉnh learning rate
+    - Gradient Clipping & Weight Decay tránh overfitting
+    - EMA (Exponential Moving Average) cho inference ổn định
+
+[5] INFERENCE TỐI ƯU
+    - TorchScript/ONNX export cho deploy
+    - Batch evaluation cho search tree nodes
+    - FP16 inference trên CUDA
     - Model caching & warmup
 
 API Overview:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Building:
+Building (Xây dựng):
   model = build_model(arch='resnet', base_channels=128, n_blocks=12)
-  model = build_model(arch='inception', base_channels=96, n_blocks=10)
-  
-Training:
+  model = build_preset('large')  # tiny, small, medium, large, xlarge
+
+Training (Huấn luyện):
   from trainer import Trainer
   trainer = Trainer(model, train_loader, val_loader)
   trainer.train(epochs=100)
-  
-Inference:
+
+Inference (Đánh giá):
   load_model_into_cache(path, use_fp16=True, use_ema=True)
-  score = evaluate_model(board, player=1)
-  policy_dict = policy_suggest(board, top_k=20)
-  values = batch_evaluate(boards, players)  # Efficient batch
-  
-Export:
-  export_to_torchscript(model, path)
-  export_to_onnx(model, path)
-  
-Benchmark:
-  stats = benchmark_model(model, board_sizes=[100, 500, 1000])
-  
-═══════════════════════════════════════════════════════════════════════════════
+  score = evaluate_model(board, player=1)  # [-1, 1]
+  moves = policy_suggest(board, top_k=20)  # {(r,c): score}
+  values = batch_evaluate(boards, players)  # Nhanh hơn
 """
 
 import os
@@ -74,22 +60,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.cuda.amp import autocast
 
-# ═══════════════════════════════════════════════════════════════════════════
 # GLOBAL CONFIG
-# ═══════════════════════════════════════════════════════════════════════════
-BOARD_SIZE = 15
-DEFAULT_CHECKPOINT = "checkpoints/caro_best.pt"
+BOARD_SIZE = 15 # Kích thước bàn cờ 15x15
+DEFAULT_CHECKPOINT = "checkpoints/caro_best.pt" # Đường dẫn checkpoint mặc định
+# Chọn GPU nếu có, nếu không dùng CPU
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# ═══════════════════════════════════════════════════════════════════════════
 # BUILDING BLOCKS
-# ═══════════════════════════════════════════════════════════════════════════
-
 class SEBlock(nn.Module):
     """
-    Squeeze-and-Excitation Block (SENet)
-    Recalibrates channel-wise feature responses adaptively
-    Paper: https://arxiv.org/abs/1709.01507
+    Khối Squeeze-and-Excitation (SENet)
+    
+    Cơ chế hoạt động:
+    1. SQUEEZE: Nén toàn bộ kênh thành một giá trị (lấy trung bình)
+    2. EXCITATION: Học tỷ trọng quan trọng của mỗi kênh
+    3. Re-weight: Nhân lại features với các trọng số này
     """
     def __init__(self, channels: int, reduction: int = 16):
         super().__init__()
@@ -110,8 +95,29 @@ class SEBlock(nn.Module):
 
 class ResidualBlock(nn.Module):
     """
-    Bottleneck Residual Block with SE-Attention
-    Architecture: 1x1 -> 3x3 -> 1x1 + SE + Residual
+    Khối Residual với Bottleneck Design và SE-Attention
+    
+    Cấu trúc (Bottleneck):
+        Input (C channels)
+           ↓
+        Conv1x1: C → C/4 (nén xuống)
+           ↓
+        Conv3x3: C/4 → C/4 (lớn nhất)
+           ↓
+        Conv1x1: C/4 → C (mở rộng lại)
+           ↓
+        SE Block (re-weight channels)
+           ↓
+        Add input + output (residual connection)
+           ↓
+        ReLU
+           ↓
+        Output
+    
+    Lợi ích:
+    - Giảm tham số từ Conv3x3 thông thường
+    - Cho phép huấn luyện mạng sâu
+    - SE Block giúp tập trung vào thông tin quan trọng
     """
     def __init__(self, channels: int, bottleneck_ratio: float = 0.25, use_se: bool = True):
         super().__init__()
@@ -130,6 +136,11 @@ class ResidualBlock(nn.Module):
         self.relu = nn.ReLU(inplace=True)
     
     def forward(self, x):
+
+        """
+        Forward pass với residual connection
+        Công thức: output = ReLU(x + bottleneck(x))
+        """
         residual = x
         
         out = self.relu(self.bn1(self.conv1(x)))
@@ -144,8 +155,12 @@ class ResidualBlock(nn.Module):
 
 class InceptionModule(nn.Module):
     """
-    Multi-scale feature extraction (Inception-style)
-    Parallel paths: 1x1, 3x3, 5x5, pool
+    Khối Inception: 4 đường song song
+    - Conv1x1: Capture local patterns
+    - Conv3x3: Capture medium-range patterns
+    - Conv5x5: Capture large-range patterns
+    - MaxPool: Lọc features nổi bật
+    - Tất cả kết hợp lại = rich representation
     """
     def __init__(self, in_channels: int, out_channels: int):
         super().__init__()
@@ -195,23 +210,38 @@ class InceptionModule(nn.Module):
             self.pathp(x)
         ], dim=1)
 
-
-# ═══════════════════════════════════════════════════════════════════════════
 # MAIN ARCHITECTURE
-# ═══════════════════════════════════════════════════════════════════════════
-
 class CaroNet(nn.Module):
     """
-    Advanced CNN for Caro/Gomoku position evaluation
+    Mạng CNN chính cho Caro/Gomoku
+    Kiến trúc tổng thể:
+        Board Input (15x15)
+           ↓
+        STEM (2 Conv layers) → Trích xuất features ban đầu
+           ↓
+        TOWER (10-20 Residual/Inception blocks) → Deep feature extraction
+           ↓
+        ┌─────────────────┴──────────────────┐
+        ↓                                    ↓
+    POLICY HEAD                         VALUE HEAD
+    (Dự đoán nước đi)                  (Dự đoán xác suất thắng)
+        ↓                                    ↓
+    Softmax over moves                  Tanh ∈ [-1, 1]
+        ↓                                    ↓
+    Policy distribution                Evaluation score
     
-    Args:
-        arch: Architecture type ('resnet' | 'inception' | 'hybrid')
-        in_channels: Input channels (default 2: player + opponent)
-        board_size: Board dimension (default 15)
-        base_channels: Base channel width (64/96/128/256)
-        n_blocks: Number of residual/inception blocks (6-20)
-        use_se: Use Squeeze-Excitation attention
-        dropout: Dropout rate for heads (0.0-0.3)
+    Inputs:
+        - arch: Kiên trúc của tower ('resnet' | 'inception' | 'hybrid')
+        - in_channels: Số kênh input (2: player + opponent)
+        - board_size: Kích thước bàn (15)
+        - base_channels: Số kênh cơ sở (64/96/128/192)
+        - n_blocks: Số lớp residual/inception (6-20)
+        - use_se: Có dùng SE-blocks không
+        - dropout: Tỷ lệ dropout (0.0-0.3)
+    
+    Outputs:
+        - value: (B, 1) ∈ [-1, 1] - xác suất thắng
+        - policy: (B, H*W) - logits của từng nước đi
     """
     
     def __init__(
@@ -229,9 +259,7 @@ class CaroNet(nn.Module):
         self.board_size = board_size
         self.base_channels = base_channels
         
-        # ═══════════════════════════════════════════════════════════════════
         # [1] STEM: Initial feature extraction
-        # ═══════════════════════════════════════════════════════════════════
         self.stem = nn.Sequential(
             nn.Conv2d(in_channels, base_channels, 3, padding=1, bias=False),
             nn.BatchNorm2d(base_channels),
@@ -241,9 +269,7 @@ class CaroNet(nn.Module):
             nn.ReLU(inplace=True)
         )
         
-        # ═══════════════════════════════════════════════════════════════════
         # [2] TOWER: Deep feature extraction
-        # ═══════════════════════════════════════════════════════════════════
         if arch == 'resnet':
             self.tower = self._build_resnet_tower(base_channels, n_blocks, use_se)
         elif arch == 'inception':
@@ -253,9 +279,7 @@ class CaroNet(nn.Module):
         else:
             raise ValueError(f"Unknown arch: {arch}")
         
-        # ═══════════════════════════════════════════════════════════════════
         # [3] POLICY HEAD: Move distribution prediction
-        # ═══════════════════════════════════════════════════════════════════
         self.policy_conv = nn.Sequential(
             nn.Conv2d(base_channels, 4, 1, bias=False),
             nn.BatchNorm2d(4),
@@ -266,9 +290,7 @@ class CaroNet(nn.Module):
             nn.Linear(4 * board_size * board_size, board_size * board_size)
         )
         
-        # ═══════════════════════════════════════════════════════════════════
         # [4] VALUE HEAD: Win probability estimation
-        # ═══════════════════════════════════════════════════════════════════
         self.value_conv = nn.Sequential(
             nn.Conv2d(base_channels, 2, 1, bias=False),
             nn.BatchNorm2d(2),
@@ -284,7 +306,8 @@ class CaroNet(nn.Module):
         )
         
         self._initialize_weights()
-    
+
+    # Hàm xây dựng tower cho tưng kiến trúc
     def _build_resnet_tower(self, channels: int, n_blocks: int, use_se: bool):
         """Build ResNet-style tower"""
         blocks = []
@@ -356,10 +379,7 @@ class CaroNet(nn.Module):
         }
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # MODEL BUILDER
-# ═══════════════════════════════════════════════════════════════════════════
-
 def build_model(
     arch: str = 'hybrid',
     base_channels: int = 192,
@@ -384,19 +404,23 @@ def build_model(
     
     # Count parameters
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"✅ Built {arch.upper()} model: {n_params:,} parameters")
     
     return model
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # EXPONENTIAL MOVING AVERAGE (EMA)
-# ═══════════════════════════════════════════════════════════════════════════
-
 class EMA:
     """
-    Exponential Moving Average of model weights
-    Provides more stable inference than latest checkpoint
+    Exponential Moving Average (Trung bình động hàm mũ)
+    
+    Tác dụng:
+    - Giữ bản "bóng" của trọng số mô hình
+    - Trong quá trình huấn luyện, update trọng số slowly
+    - Dùng trọng số EMA cho inference thay vì trọng số mới nhất
+    - Cho kết quả ổn định hơn
+    
+    Công thức update:
+        shadow_t = decay * shadow_{t-1} + (1 - decay) * weight_t
     """
     def __init__(self, model: nn.Module, decay: float = 0.999):
         self.decay = decay
@@ -429,10 +453,7 @@ class EMA:
                 param.data.copy_(self.backup[name])
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # CHECKPOINT MANAGEMENT
-# ═══════════════════════════════════════════════════════════════════════════
-
 def save_checkpoint(
     path: str,
     model: nn.Module,
@@ -501,13 +522,16 @@ def load_checkpoint(
     return model
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# INFERENCE ENGINE
-# ═══════════════════════════════════════════════════════════════════════════
-
+#Class InferenceENgine
 class InferenceEngine:
     """
-    Optimized inference engine with caching and batch processing
+    Engine đánh giá tối ưu với cache và batch processing
+    
+    Tính năng:
+    - Sử dụng Mixed Precision (FP16) trên GPU
+    - Warmup GPU trước khi dùng
+    - Batch evaluate hiệu quả
+    - Xử lý lỗi mạnh mẽ
     """
     def __init__(self, model: CaroNet, device: str = DEVICE, use_fp16: bool = True):
         self.model = model
@@ -520,11 +544,10 @@ class InferenceEngine:
         if self.use_fp16:
             self.model.half()
         
-        # Warmup
         self._warmup()
     
     def _warmup(self, n_runs: int = 5):
-        """Warmup GPU/CPU for consistent timing"""
+        """Warmup GPU/CPU"""
         dummy = torch.zeros((4, 2, BOARD_SIZE, BOARD_SIZE), 
                            dtype=torch.float16 if self.use_fp16 else torch.float32,
                            device=self.device)
@@ -534,35 +557,43 @@ class InferenceEngine:
     
     @torch.no_grad()
     def evaluate(self, board, player: int = 1) -> float:
-        """Single board evaluation"""
-        x = self._board_to_tensor(board, player)
-        value, _ = self.model(x)
-        return float(value.item())
+        """Single board evaluation - FIXED: More robust"""
+        try:
+            x = self._board_to_tensor(board, player)
+            value, _ = self.model(x)
+            score = float(value.item())
+            # Clamp to [-1, 1]
+            return max(-1.0, min(1.0, score))
+        except Exception as e:
+            print(f"⚠️ Evaluation failed: {e}")
+            return 0.0
     
     @torch.no_grad()
     def policy(self, board, player: int = 1, top_k: Optional[int] = None) -> Dict[Tuple[int,int], float]:
         """Get policy distribution"""
-        x = self._board_to_tensor(board, player)
-        _, logits = self.model(x)
-        logits = logits.squeeze(0).cpu().numpy()
-        
-        # Get empty cells
-        grid = getattr(board, 'grid', None)
-        if grid is None:
-            raise ValueError("Board must have .grid attribute")
-        
-        moves = {}
-        for idx, score in enumerate(logits):
-            r, c = idx // BOARD_SIZE, idx % BOARD_SIZE
-            if grid[r, c] == 0:
-                moves[(r, c)] = float(score)
-        
-        # Sort and return top_k
-        if top_k is not None:
-            items = sorted(moves.items(), key=lambda x: x[1], reverse=True)[:top_k]
-            return dict(items)
-        
-        return moves
+        try:
+            x = self._board_to_tensor(board, player)
+            _, logits = self.model(x)
+            logits = logits.squeeze(0).cpu().numpy()
+            
+            grid = getattr(board, 'grid', None)
+            if grid is None:
+                return {}
+            
+            moves = {}
+            for idx, score in enumerate(logits):
+                r, c = idx // BOARD_SIZE, idx % BOARD_SIZE
+                if grid[r, c] == 0:
+                    moves[(r, c)] = float(score)
+            
+            if top_k is not None:
+                items = sorted(moves.items(), key=lambda x: x[1], reverse=True)[:top_k]
+                return dict(items)
+            
+            return moves
+        except Exception as e:
+            print(f"Policy failed: {e}")
+            return {}
     
     @torch.no_grad()
     def batch_evaluate(self, boards: List, players: List[int]) -> np.ndarray:
@@ -570,31 +601,36 @@ class InferenceEngine:
         if len(boards) != len(players):
             raise ValueError("boards and players must have same length")
         
-        tensors = [self._board_to_tensor(b, p) for b, p in zip(boards, players)]
-        X = torch.cat(tensors, dim=0)
-        
-        values, _ = self.model(X)
-        return values.squeeze(1).cpu().numpy()
+        try:
+            tensors = [self._board_to_tensor(b, p) for b, p in zip(boards, players)]
+            X = torch.cat(tensors, dim=0)
+            
+            values, _ = self.model(X)
+            return values.squeeze(1).cpu().numpy()
+        except Exception as e:
+            print(f"Batch evaluation failed: {e}")
+            return np.zeros(len(boards))
     
     def _board_to_tensor(self, board, player: int) -> torch.Tensor:
         """Convert board to model input"""
-        if hasattr(board, 'to_cnn_input'):
-            arr = board.to_cnn_input(player)
-        else:
-            grid = np.array(board.grid, dtype=np.int8)
-            p_layer = (grid == player).astype(np.float32)
-            o_layer = (grid == -player).astype(np.float32)
-            arr = np.stack([p_layer, o_layer], axis=0)
-        
-        tensor = torch.from_numpy(arr).unsqueeze(0)
-        dtype = torch.float16 if self.use_fp16 else torch.float32
-        return tensor.to(device=self.device, dtype=dtype)
+        try:
+            if hasattr(board, 'to_cnn_input'):
+                arr = board.to_cnn_input(player)
+            else:
+                grid = np.array(board.grid if hasattr(board, 'grid') else board, dtype=np.int8)
+                p_layer = (grid == player).astype(np.float32)
+                o_layer = (grid == -player).astype(np.float32)
+                arr = np.stack([p_layer, o_layer], axis=0)
+            
+            tensor = torch.from_numpy(arr).unsqueeze(0)
+            dtype = torch.float16 if self.use_fp16 else torch.float32
+            return tensor.to(device=self.device, dtype=dtype)
+        except Exception as e:
+            print(f"Board to tensor conversion failed: {e}")
+            raise
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# GLOBAL INFERENCE ENGINE CACHE
-# ═══════════════════════════════════════════════════════════════════════════
-
+# Global engine cache
 _GLOBAL_ENGINE: Optional[InferenceEngine] = None
 
 
@@ -603,30 +639,28 @@ def load_model_into_cache(
     device: Optional[str] = None,
     use_fp16: bool = True,
     use_ema: bool = True
-):
+) -> InferenceEngine:
     """Load model into global cache for fast repeated inference"""
     global _GLOBAL_ENGINE
     
-    model = load_checkpoint(path, device=device, use_ema=use_ema)
-    _GLOBAL_ENGINE = InferenceEngine(model, device=device or DEVICE, use_fp16=use_fp16)
+    print(f"Loading model from {path}...")
     
-    print(f"✅ Model loaded into cache: {path}")
-    return _GLOBAL_ENGINE
+    try:
+        model = load_checkpoint(path, device=device, use_ema=use_ema)
+        _GLOBAL_ENGINE = InferenceEngine(model, device=device or DEVICE, use_fp16=use_fp16)
+        print(f"Model loaded successfully")
+        return _GLOBAL_ENGINE
+    except Exception as e:
+        print(f"Failed to load model: {e}")
+        raise
 
 
-def evaluate_model(board, current_player: int = 1, 
-                   model: Optional[CaroNet] = None,
-                   device: Optional[str] = None,
-                   use_fp16: bool = False) -> float:
-    """Evaluate single board position"""
-    if model is not None:
-        # Use provided model
-        engine = InferenceEngine(model, device=device or DEVICE, use_fp16=use_fp16)
-        return engine.evaluate(board, current_player)
+def evaluate_model(board, current_player: int = 1) -> float:
+    """Evaluate using cached model - FIXED: Better error handling"""
+    global _GLOBAL_ENGINE
     
-    # Use cached model
     if _GLOBAL_ENGINE is None:
-        raise RuntimeError("No model loaded. Call load_model_into_cache() first.")
+        raise RuntimeError("No model cached. Call load_model_into_cache() first.")
     
     return _GLOBAL_ENGINE.evaluate(board, current_player)
 
@@ -661,10 +695,7 @@ def batch_evaluate(boards: List, players: List[int],
     return _GLOBAL_ENGINE.batch_evaluate(boards, players)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # EXPORT UTILITIES
-# ═══════════════════════════════════════════════════════════════════════════
-
 def export_to_torchscript(model: CaroNet, path: str, optimize: bool = True):
     """Export to TorchScript for faster loading"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -680,7 +711,7 @@ def export_to_torchscript(model: CaroNet, path: str, optimize: bool = True):
         traced = torch.jit.script(model)
     
     traced.save(path)
-    print(f"📦 Exported TorchScript → {path}")
+    print(f"Exported TorchScript → {path}")
 
 
 def export_to_onnx(model: CaroNet, path: str, opset: int = 14):
@@ -697,13 +728,10 @@ def export_to_onnx(model: CaroNet, path: str, opset: int = 14):
         output_names=['value', 'policy'],
         dynamic_axes={'board': {0: 'batch'}}
     )
-    print(f"📦 Exported ONNX → {path}")
+    print(f"Exported ONNX → {path}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # BENCHMARKING
-# ═══════════════════════════════════════════════════════════════════════════
-
 def benchmark_model(model: CaroNet, board_sizes: List[int] = [1, 10, 100, 500]):
     """Benchmark inference speed"""
     print("\n" + "═"*60)
@@ -757,10 +785,7 @@ def benchmark_model(model: CaroNet, board_sizes: List[int] = [1, 10, 100, 500]):
     return results
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # MODEL ANALYSIS
-# ═══════════════════════════════════════════════════════════════════════════
-
 def analyze_model(model: CaroNet, verbose: bool = True):
     """Analyze model architecture and parameters"""
     total_params = sum(p.numel() for p in model.parameters())
@@ -768,7 +793,7 @@ def analyze_model(model: CaroNet, verbose: bool = True):
     
     if verbose:
         print("\n" + "═"*60)
-        print("🔍 MODEL ANALYSIS")
+        print("MODEL ANALYSIS")
         print("═"*60)
         print(f"Architecture: {model.arch.upper()}")
         print(f"Base Channels: {model.base_channels}")
@@ -779,7 +804,7 @@ def analyze_model(model: CaroNet, verbose: bool = True):
         print(f"Memory (FP16): {total_params * 2 / 1024**2:.2f} MB")
         
         # Layer-wise breakdown
-        print("\n📊 Layer Breakdown:")
+        print("\nLayer Breakdown:")
         print("-"*60)
         
         layer_params = {}
@@ -798,10 +823,7 @@ def analyze_model(model: CaroNet, verbose: bool = True):
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # VISUALIZATION (Optional)
-# ═══════════════════════════════════════════════════════════════════════════
-
 def visualize_attention(model: CaroNet, board, save_path: Optional[str] = None):
     """
     Visualize what the model pays attention to (requires matplotlib)
@@ -810,7 +832,7 @@ def visualize_attention(model: CaroNet, board, save_path: Optional[str] = None):
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("⚠️  matplotlib not installed. Install with: pip install matplotlib")
+        print("matplotlib not installed. Install with: pip install matplotlib")
         return
     
     model.eval()
@@ -872,15 +894,12 @@ def visualize_attention(model: CaroNet, board, save_path: Optional[str] = None):
     
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"💾 Saved visualization → {save_path}")
+        print(f"Saved visualization → {save_path}")
     else:
         plt.show()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # PRESET CONFIGURATIONS
-# ═══════════════════════════════════════════════════════════════════════════
-
 PRESET_CONFIGS = {
     'tiny': {
         'arch': 'resnet',
@@ -905,15 +924,15 @@ PRESET_CONFIGS = {
     },
     'large': {
         'arch': 'resnet',
-        'base_channels': 128,
-        'n_blocks': 12,
+        'base_channels': 144,
+        'n_blocks': 14,
         'use_se': True,
         'dropout': 0.1
     },
     'xlarge': {
-        'arch': 'hybrid',
+        'arch': 'resnet',
         'base_channels': 192,
-        'n_blocks': 16,
+        'n_blocks': 18,
         'use_se': True,
         'dropout': 0.15
     },
@@ -948,92 +967,3 @@ def build_preset(preset: str, **overrides) -> CaroNet:
     config.update(overrides)
     
     return build_model(**config)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TESTING & VALIDATION
-# ═══════════════════════════════════════════════════════════════════════════
-
-def test_model_sanity():
-    """Quick sanity check for model functionality"""
-    print("\n" + "═"*60)
-    print("🧪 MODEL SANITY TEST")
-    print("═"*60)
-    
-    # Test each architecture
-    for arch in ['resnet', 'inception', 'hybrid']:
-        print(f"\n[{arch.upper()}]")
-        model = build_model(arch=arch, base_channels=64, n_blocks=4)
-        model.eval()
-        
-        # Test forward pass
-        x = torch.randn(2, 2, BOARD_SIZE, BOARD_SIZE)
-        
-        with torch.no_grad():
-            value, policy = model(x)
-        
-        # Validate outputs
-        assert value.shape == (2, 1), f"Value shape mismatch: {value.shape}"
-        assert policy.shape == (2, BOARD_SIZE * BOARD_SIZE), f"Policy shape mismatch: {policy.shape}"
-        assert value.min() >= -1 and value.max() <= 1, "Value not in [-1, 1]"
-        
-        print(f"  ✅ Forward pass OK")
-        print(f"  ✅ Value range: [{value.min():.3f}, {value.max():.3f}]")
-        print(f"  ✅ Policy shape: {policy.shape}")
-    
-    # Test checkpoint save/load
-    print(f"\n[CHECKPOINT]")
-    model = build_preset('small')
-    save_checkpoint('test_checkpoint.pt', model, epoch=0)
-    loaded_model = load_checkpoint('test_checkpoint.pt')
-    print(f"  ✅ Save/Load OK")
-    
-    # Cleanup
-    os.remove('test_checkpoint.pt')
-    
-    print("\n" + "═"*60)
-    print("✅ ALL TESTS PASSED")
-    print("═"*60)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# MAIN (Demo & Testing)
-# ═══════════════════════════════════════════════════════════════════════════
-
-if __name__ == "__main__":
-    print("""
-    ╔═══════════════════════════════════════════════════════════════════════╗
-    ║                     CARO AI - MODEL CENTER v3.0                       ║
-    ║                Advanced CNN Architecture for Gomoku/Caro              ║
-    ╚═══════════════════════════════════════════════════════════════════════╝
-    """)
-    
-    # Run sanity tests
-    test_model_sanity()
-    
-    # Demo: Build and analyze different models
-    print("\n" + "="*60)
-    print("📊 PRESET COMPARISON")
-    print("="*60)
-    
-    for preset in ['tiny', 'small', 'medium', 'large']:
-        print(f"\n[{preset.upper()}]")
-        model = build_preset(preset)
-        stats = analyze_model(model, verbose=False)
-        print(f"  Parameters: {stats['total_params']:,}")
-        print(f"  Memory (FP16): {stats['total_params'] * 2 / 1024**2:.1f} MB")
-    
-    # Benchmark inference speed
-    print("\n" + "="*60)
-    print("🚀 INFERENCE BENCHMARK")
-    print("="*60)
-    
-    model = build_preset('medium').to(DEVICE)
-    benchmark_model(model, board_sizes=[1, 10, 100, 500])
-    
-    print("\n✅ Demo complete! Model is ready for training.")
-    print("\nNext steps:")
-    print("  1. Generate training data with selfplay.py")
-    print("  2. Train with trainer.py")
-    print("  3. Evaluate with searchs.py integration")
-    print("  4. Export with export_to_torchscript() or export_to_onnx()")

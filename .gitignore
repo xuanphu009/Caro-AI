@@ -4,6 +4,8 @@
 # VSCode settings
 .vscode/
 
+checkpoints/
+data/
 # Python cache and virtual env
 __pycache__/
 *.py[cod]
