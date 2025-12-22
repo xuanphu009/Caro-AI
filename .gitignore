@@ -1,0 +1,19 @@
+# MacOS system files
+.DS_Store
+
+# VSCode settings
+.vscode/
+
+checkpoints/
+data/
+# Python cache and virtual env
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.env/
+venv/
+.envrc
+
+# Logs
+*.log
