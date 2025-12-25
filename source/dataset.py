@@ -6,9 +6,7 @@ import os
 from typing import Optional
 
 class CaroDataset(Dataset):
-    """
-    ✅ FIXED VERSION - Sửa lỗi label và augmentation
-    
+    """"
     Changes:
     1. Label được gán CHÍNH XÁC theo từng position
     2. Augmentation chỉ áp dụng trong training (không làm phình dataset)
@@ -19,7 +17,7 @@ class CaroDataset(Dataset):
         self.results = []
         self.move_indices = []
         self.min_game_length = min_game_length
-        self.use_augmentation = use_augmentation  # ✅ Chỉ augment khi cần
+        self.use_augmentation = use_augmentation 
         self._load_data(data_dir)
         
     def _load_data(self, data_dir):
@@ -39,7 +37,7 @@ class CaroDataset(Dataset):
             moves = game["moves"]
             winner = game.get("winner", 0)
             
-            # ✅ FIXED: Xử lý cả old format và new format
+            
             first_player = game.get("first_player", None)
             
             if first_player in [None, "AI", "ai", "player1", "p1", "1"]:
@@ -58,7 +56,7 @@ class CaroDataset(Dataset):
                 skipped_games += 1
                 continue
             
-            # ✅ FIXED: Reconstruct game với first_player đúng
+            
             board = np.zeros((15, 15), dtype=np.int8)
             
             
@@ -68,13 +66,11 @@ class CaroDataset(Dataset):
                 opp_layer = (board == -player).astype(np.float32)
                 state = np.stack([player_layer, opp_layer], axis=0)
                 
-                # ✅ CRITICAL FIX: Label phải phản ánh "player này có thắng không?"
                 # - Nếu game chưa kết thúc, ta không biết → dùng intermediate value
                 # - Nếu winner == player → +1.0
                 # - Nếu winner == -player → -1.0
                 # - Nếu draw → 0.0
                 
-                # ✅ IMPROVED: Dùng "reward shaping" - gần cuối game có signal mạnh hơn
                 remaining_moves = len(moves) - move_idx
                 discount = 0.95 ** remaining_moves  # Exponential decay
                 
@@ -85,10 +81,9 @@ class CaroDataset(Dataset):
                 else:
                     label = discount * (-1.0)  # Loser gets negative
                 
-                # ✅ Convert move to index
+              
                 move_index = r * 15 + c
                 
-                # ✅ FIXED: Không augment ở đây! Augment trong __getitem__
                 self.boards.append(state)
                 self.results.append(label)
                 self.move_indices.append(move_index)
@@ -112,7 +107,7 @@ class CaroDataset(Dataset):
         print(f"📊 Total positions: {len(self.boards)}")
         print(f"📈 Avg moves/game: {len(self.boards)/max(1, loaded_games):.1f}")
         
-        # ✅ Check label distribution
+        # Check label distribution
         if len(self.results) > 0:
             n_win = np.sum(self.results > 0)
             n_loss = np.sum(self.results < 0)
@@ -124,7 +119,6 @@ class CaroDataset(Dataset):
             print(f"   Loss positions: {n_loss:6d} ({n_loss/total*100:5.1f}%)")
             print(f"   Draw positions: {n_draw:6d} ({n_draw/total*100:5.1f}%)")
             
-            # ✅ FIXED: Relaxed threshold (40% → 60% is acceptable)
             if abs(n_win - n_loss) > total * 0.4:
                 print(f"\n⚠️  WARNING: Label imbalance detected!")
                 print(f"   Difference: {abs(n_win - n_loss)} positions ({abs(n_win-n_loss)/total*100:.1f}%)")
@@ -132,7 +126,6 @@ class CaroDataset(Dataset):
 
     def _augment_single(self, state: np.ndarray, move_idx: int) -> tuple:
         """
-        ✅ FIXED: Augmentation đơn giản, random transformation
         Chỉ áp dụng 1 transform cho mỗi sample (không tạo 8x data)
         """
         if not self.use_augmentation:
@@ -158,9 +151,7 @@ class CaroDataset(Dataset):
         return len(self.boards)
     
     def __getitem__(self, idx):
-        """
-        ✅ FIXED: Augmentation on-the-fly (chỉ khi use_augmentation=True)
-        """
+     
         state = self.boards[idx]
         label = self.results[idx]
         move_idx = self.move_indices[idx]
@@ -175,7 +166,6 @@ class CaroDataset(Dataset):
         return x, y, m
 
 
-# ✅ DATA QUALITY ANALYSIS (Updated)
 def analyze_dataset(data_dir="data/professional"):
     """Analyze dataset quality with improved metrics"""
     print("\n" + "="*60)
@@ -236,7 +226,7 @@ def analyze_dataset(data_dir="data/professional"):
     print(f"  Player 2 wins: {results['p2_win']:4d} ({results['p2_win']/total_games*100:5.1f}%)")
     print(f"  Draws:         {results['draw']:4d} ({results['draw']/total_games*100:5.1f}%)")
     
-    # ✅ Check balance
+    # Check balance
     if len(first_players) > 0:
         n_p1_first = sum(1 for p in first_players if p == 1)
         n_p2_first = sum(1 for p in first_players if p == -1)
@@ -244,7 +234,7 @@ def analyze_dataset(data_dir="data/professional"):
         print(f"  Player 1 starts: {n_p1_first} ({n_p1_first/len(first_players)*100:.1f}%)")
         print(f"  Player -1 starts: {n_p2_first} ({n_p2_first/len(first_players)*100:.1f}%)")
     
-    # ✅ Warnings
+    # Warnings
     p1_rate = results['p1_win'] / (results['p1_win'] + results['p2_win'] + 0.001)
     if abs(p1_rate - 0.5) > 0.15:
         print(f"\n⚠️  WARNING: Win rate imbalance!")
